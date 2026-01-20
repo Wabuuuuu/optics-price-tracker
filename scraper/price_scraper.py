@@ -33,7 +33,27 @@ def setup_selenium():
 def capture_page_screenshot(driver, url):
     try:
         driver.get(url)
-        time.sleep(3)
+        time.sleep(5)  # Give pages more time to load
+```
+
+---
+
+## 🎯 **Alternative: Test with Direct Product URLs**
+
+Let's make sure the URLs in your config are correct. Can you check:
+
+1. **Go to** `scraper/config.py`
+2. **Verify the URLs** - try opening them in your browser
+3. Make sure they go directly to the product page (not search results)
+
+**Good URL example:**
+```
+https://www.opticsplanet.com/vortex-viper-pst-gen-ii-riflescope.html
+```
+
+**Bad URL example:**
+```
+https://www.opticsplanet.com/search?q=vortex+viper
         screenshot = driver.get_screenshot_as_png()
         return base64.b64encode(screenshot).decode('utf-8')
     except Exception as e:
@@ -59,26 +79,21 @@ def extract_price_with_ai(screenshot_base64, page_html, product_name, retailer):
                         },
                         {
                             "type": "text",
-                            "text": f"""You are analyzing a product page for "{product_name}" from {retailer}.
+                            "text": f"""Look at this product page screenshot for "{product_name}" from {retailer}.
 
-Extract the current price and stock status.
+Find the main product price and tell me if it's in stock.
 
-Respond with ONLY a JSON object in this exact format:
-{{
-    "price": 899.99,
-    "in_stock": true,
-    "currency": "USD"
-}}
+You MUST respond with ONLY valid JSON in exactly this format with no other text:
+{{"price": 899.99, "in_stock": true, "currency": "USD"}}
 
 Rules:
-- Price should be a number (no dollar signs or commas)
-- If out of stock, set in_stock to false
-- If you cannot find the price, set price to null
-- Look for the main product price
+- price must be a number like 899.99 (no dollar signs, no commas)
+- If you cannot find a clear price, use null
+- in_stock must be true or false
+- If the page says "out of stock" or "unavailable", set in_stock to false
+- Look for the PRIMARY product price, ignore related items
 
-HTML content: {page_html[:2000]}
-
-Return ONLY the JSON object."""
+Respond with ONLY the JSON object, nothing else."""
                         }
                     ],
                 }
@@ -86,12 +101,27 @@ Return ONLY the JSON object."""
         )
         
         response_text = message.content[0].text.strip()
-        if response_text.startswith("```json"):
-            response_text = response_text.replace("```json", "").replace("```", "").strip()
+        print(f"  AI Response: {response_text}")  # Debug output
         
-        return json.loads(response_text)
+        # Clean up response
+        response_text = response_text.replace("```json", "").replace("```", "").strip()
+        
+        # Try to parse JSON
+        price_data = json.loads(response_text)
+        
+        # Validate the response
+        if not isinstance(price_data.get("price"), (int, float, type(None))):
+            print(f"  Invalid price format: {price_data.get('price')}")
+            return {"price": None, "in_stock": False, "currency": "USD"}
+        
+        return price_data
+        
+    except json.JSONDecodeError as e:
+        print(f"  JSON decode error: {e}")
+        print(f"  Response was: {response_text[:200]}")
+        return {"price": None, "in_stock": False, "currency": "USD"}
     except Exception as e:
-        print(f"Error extracting price: {e}")
+        print(f"  Error extracting price: {e}")
         return {"price": None, "in_stock": False, "currency": "USD"}
 
 def scrape_product_prices(product):
